@@ -10,6 +10,8 @@ import opuslib
 import sounddevice as sd
 import wave
 from dotenv import load_dotenv
+import requests  # For Groq API calls
+import base64    # For audio encoding
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -154,8 +156,56 @@ class AudioServer:
     def __init__(self):
         self.active_sessions = {}
         self.deepgram_api_key = os.getenv("DEEPGRAM_API_KEY")
+        self.groq_api_key = os.getenv("GROQ_API_KEY")
+        self.elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")  # Added this line
+        
         if not self.deepgram_api_key:
             print("⚠️ DEEPGRAM_API_KEY environment variable not set. Transcription will be disabled.")
+        if not self.groq_api_key:
+            print("⚠️ GROQ_API_KEY environment variable not set. LLM responses will be disabled.")
+        if not self.elevenlabs_api_key:
+            print("⚠️ ELEVENLABS_API_KEY environment variable not set. Audio generation will be disabled.")
+
+    def get_llm_response(self, transcript):
+        """Get response from Groq Llama 3.3"""
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {self.groq_api_key}",
+            "Content-Type": "application/json"
+        }
+        data = {
+            "model": "llama3-70b-8192",
+            "messages": [{"role": "user", "content": transcript}],
+            "temperature": 0.7
+        }
+        
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        return response.json()["choices"][0]["message"]["content"]
+    
+    def generate_audio(self, text):
+        """Generate audio from text using ElevenLabs"""
+        if not self.elevenlabs_api_key:
+            print("   ⚠️ ElevenLabs API key not available, skipping audio generation")
+            return b""  # Return empty bytes instead of failing
+            
+        url = "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM"  # Default voice ID
+        headers = {
+            "xi-api-key": self.elevenlabs_api_key,
+            "Content-Type": "application/json"
+        }
+        data = {
+            "text": text,
+            "model_id": "eleven_monolingual_v1",
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.75
+            }
+        }
+        
+        response = requests.post(url, headers=headers, json=data)
+        response.raise_for_status()
+        return response.content
 
     async def handle_websocket(self, websocket: WebSocket):
         await websocket.accept()
@@ -260,6 +310,25 @@ class AudioServer:
                                         with open(transcript_filename, 'w', encoding='utf-8') as f:
                                             f.write(transcript)
                                         print(f"   ✅ Transcript saved: {transcript_filename}")
+                                        
+                                        # Generate LLM response and audio if Groq API key is available
+                                        if self.groq_api_key and transcript:
+                                            try:
+                                                # Get LLM response from Groq
+                                                llm_response = self.get_llm_response(transcript)
+                                                print(f"   🤖 LLM Response: {llm_response}")
+                                                
+                                                # Generate audio from LLM response
+                                                audio_data = self.generate_audio(llm_response)
+                                                
+                                                # Send audio to client (only if we have audio data)
+                                                if audio_data:
+                                                    await websocket.send_bytes(audio_data)
+                                                    print("   🔊 Audio response sent to client")
+                                                else:
+                                                    print("   ⚠️ No audio data generated")
+                                            except Exception as e:
+                                                print(f"   ❌ Groq/ElevenLabs processing failed: {e}")
                                     else:
                                         print("   ⚠️ No transcript generated")
 
@@ -313,18 +382,7 @@ class AudioServer:
                                     print(f"   ⏱️ Audio duration: {duration_seconds:.2f} seconds")
 
                                     # Playback
-                                    print(f"\n🔊 STARTING PLAYBACK...")
-                                    try:
-                                        np_audio = np.frombuffer(pcm_data, dtype=np.int16)
-                                        print(f"   Audio array shape: {np_audio.shape}")
-                                        print(f"   Audio range: {np_audio.min()} to {np_audio.max()}")
-                                        
-                                        sd.play(np_audio, samplerate=sample_rate)
-                                        print(f"   ✅ Playback started successfully")
-                                        sd.wait()
-                                        print(f"   ✅ Playback completed")
-                                    except Exception as e:
-                                        print(f"   ❌ Playback failed: {e}")
+                                    
 
                                     # Save as WAV
                                     print(f"\n💾 SAVING WAV FILE...")
