@@ -12,6 +12,10 @@ import wave
 from dotenv import load_dotenv
 import requests  # For Groq API calls
 import base64    # For audio encoding
+from pydub import AudioSegment
+from pydub.playback import play
+import io
+import struct
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
@@ -157,7 +161,7 @@ class AudioServer:
         self.active_sessions = {}
         self.deepgram_api_key = os.getenv("DEEPGRAM_API_KEY")
         self.groq_api_key = os.getenv("GROQ_API_KEY")
-        self.elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")  # Added this line
+        self.elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
         
         if not self.deepgram_api_key:
             print("⚠️ DEEPGRAM_API_KEY environment variable not set. Transcription will be disabled.")
@@ -175,7 +179,7 @@ class AudioServer:
         }
         data = {
             "model": "llama3-70b-8192",
-            "messages": [{"role": "user", "content": transcript}],
+            "messages": [{"role": "user", "content": transcript + "\nRespond in under 50 words."}],
             "temperature": 0.7
         }
         
@@ -183,11 +187,11 @@ class AudioServer:
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
     
-    def generate_audio(self, text):
-        """Generate audio from text using ElevenLabs"""
+    def generate_audio_opus(self, text, target_sample_rate=16000, target_channels=1, frame_duration=20):
+        """Generate Opus audio from text using ElevenLabs and convert to Opus format"""
         if not self.elevenlabs_api_key:
             print("   ⚠️ ElevenLabs API key not available, skipping audio generation")
-            return b""  # Return empty bytes instead of failing
+            return []
             
         url = "https://api.elevenlabs.io/v1/text-to-speech/21m00Tcm4TlvDq8ikWAM"  # Default voice ID
         headers = {
@@ -203,9 +207,98 @@ class AudioServer:
             }
         }
         
-        response = requests.post(url, headers=headers, json=data)
-        response.raise_for_status()
-        return response.content
+        try:
+            response = requests.post(url, headers=headers, json=data)
+            response.raise_for_status()
+            
+            # ElevenLabs returns MP3 audio, convert to PCM first
+            print(f"   🎵 Received {len(response.content)} bytes of MP3 audio from ElevenLabs")
+            
+            # Load MP3 audio using pydub
+            audio_segment = AudioSegment.from_mp3(io.BytesIO(response.content))
+            print(f"   📊 Original audio: {audio_segment.frame_rate}Hz, {audio_segment.channels} channels, {len(audio_segment)}ms duration")
+            
+            # Convert to target format (16kHz mono)
+            if audio_segment.frame_rate != target_sample_rate:
+                audio_segment = audio_segment.set_frame_rate(target_sample_rate)
+                print(f"   🔄 Resampled to {target_sample_rate}Hz")
+                
+            if audio_segment.channels != target_channels:
+                audio_segment = audio_segment.set_channels(target_channels)
+                print(f"   🔄 Converted to {target_channels} channel(s)")
+            
+            # Ensure 16-bit PCM
+            audio_segment = audio_segment.set_sample_width(2)  # 2 bytes = 16 bits
+            
+            # Get raw PCM data
+            pcm_data = audio_segment.raw_data
+            print(f"   ✅ Generated PCM audio: {len(pcm_data)} bytes, {target_sample_rate}Hz, {target_channels} channel(s), 16-bit")
+            
+            # Convert PCM to Opus frames
+            try:
+                # Initialize Opus encoder
+                encoder = opuslib.Encoder(target_sample_rate, target_channels, 'voip')
+                print(f"   🎵 Opus encoder initialized")
+                
+                # Calculate frame parameters
+                frame_size = (frame_duration * target_sample_rate) // 1000
+                frame_bytes = frame_size * target_channels * 2  # 16-bit = 2 bytes per sample
+                
+                print(f"   📏 Frame size: {frame_size} samples, {frame_bytes} bytes per frame")
+                
+                opus_frames = []
+                
+                # Split PCM data into frames and encode each
+                for i in range(0, len(pcm_data), frame_bytes):
+                    pcm_frame = pcm_data[i:i + frame_bytes]
+                    
+                    # Pad the last frame if necessary
+                    if len(pcm_frame) < frame_bytes:
+                        padding = b'\x00' * (frame_bytes - len(pcm_frame))
+                        pcm_frame = pcm_frame + padding
+                        print(f"   🔧 Padded last frame: {len(pcm_frame)} bytes")
+                    
+                    try:
+                        # Encode PCM frame to Opus
+                        opus_frame = encoder.encode(pcm_frame, frame_size)
+                        opus_frames.append(opus_frame)
+                        
+                    except opuslib.OpusError as e:
+                        print(f"   ❌ Opus encoding error for frame {len(opus_frames)}: {e}")
+                        continue
+                
+                print(f"   ✅ Generated {len(opus_frames)} Opus frames")
+                return opus_frames
+                
+            except Exception as e:
+                print(f"   ❌ Opus conversion failed: {e}")
+                return []
+            
+        except Exception as e:
+            print(f"   ❌ Audio generation failed: {e}")
+            return []
+
+    async def send_opus_frames(self, websocket, opus_frames, frame_duration=20):
+        """Send Opus frames to client with proper framing"""
+        try:
+            print(f"   📤 Sending {len(opus_frames)} Opus frames to client...")
+            
+            for i, opus_frame in enumerate(opus_frames):
+                # Create message with 4-byte length header + Opus frame
+                frame_length = len(opus_frame)
+                message = struct.pack('>I', frame_length) + opus_frame
+                
+                # Send the frame
+                await websocket.send_bytes(message)
+                print(f"   📦 Sent frame {i+1}/{len(opus_frames)}: {frame_length} bytes")
+                
+                # Add small delay between frames to simulate real-time playback
+                await asyncio.sleep(frame_duration / 1000.0)  # Convert ms to seconds
+                
+            print(f"   ✅ All Opus frames sent successfully")
+            
+        except Exception as e:
+            print(f"   ❌ Error sending Opus frames: {e}")
 
     async def handle_websocket(self, websocket: WebSocket):
         await websocket.accept()
@@ -318,17 +411,39 @@ class AudioServer:
                                                 llm_response = self.get_llm_response(transcript)
                                                 print(f"   🤖 LLM Response: {llm_response}")
                                                 
-                                                # Generate audio from LLM response
-                                                audio_data = self.generate_audio(llm_response)
+                                                # Generate Opus audio frames from LLM response
+                                                opus_frames = self.generate_audio_opus(
+                                                    llm_response, 
+                                                    target_sample_rate=sample_rate, 
+                                                    target_channels=channels,
+                                                    frame_duration=frame_duration
+                                                )
                                                 
-                                                # Send audio to client (only if we have audio data)
-                                                if audio_data:
-                                                    await websocket.send_bytes(audio_data)
-                                                    print("   🔊 Audio response sent to client")
+                                                # Send audio response to client
+                                                if opus_frames:
+                                                    print(f"   📤 Sending Opus audio to client: {len(opus_frames)} frames")
+                                                    
+                                                    # Send audio metadata first
+                                                    await websocket.send_json({
+                                                        'type': 'audio_response',
+                                                        'format': 'opus',
+                                                        'sample_rate': sample_rate,
+                                                        'channels': channels,
+                                                        'frame_duration': frame_duration,
+                                                        'frame_count': len(opus_frames),
+                                                        'text': llm_response
+                                                    })
+                                                    
+                                                    # Send Opus frames
+                                                    await self.send_opus_frames(websocket, opus_frames, frame_duration)
+                                                    print("   🔊 Opus audio response sent to client")
                                                 else:
-                                                    print("   ⚠️ No audio data generated")
+                                                    print("   ⚠️ No Opus frames generated")
+                                                    
                                             except Exception as e:
                                                 print(f"   ❌ Groq/ElevenLabs processing failed: {e}")
+                                                import traceback
+                                                traceback.print_exc()
                                     else:
                                         print("   ⚠️ No transcript generated")
 
@@ -380,9 +495,6 @@ class AudioServer:
                                 if total_pcm_bytes > 0:
                                     duration_seconds = total_pcm_bytes / (sample_rate * channels * 2)
                                     print(f"   ⏱️ Audio duration: {duration_seconds:.2f} seconds")
-
-                                    # Playback
-                                    
 
                                     # Save as WAV
                                     print(f"\n💾 SAVING WAV FILE...")
