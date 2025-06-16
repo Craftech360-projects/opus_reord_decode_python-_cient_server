@@ -153,6 +153,14 @@ class AudioClient:
                                 
                             elif data.get('type') == 'error':
                                 print(f"❌ Server error: {data.get('message')}")
+                            elif data.get('type') == 'session_status' and data.get('status') == 'session_ended':
+                                print("✅ Server signaled end of session.")
+                                self.streaming_active = False
+                                
+                            elif data.get('type') == 'stop':
+                                print("🛑 Received stop signal from server")
+                                self.streaming_active = False
+
                                 
                         except json.JSONDecodeError:
                             print(f"❌ Invalid JSON received: {message}")

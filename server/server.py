@@ -278,7 +278,7 @@ class AudioServer:
             print(f"   ❌ Audio generation failed: {e}")
             return []
 
-    async def send_opus_frames(self, websocket, opus_frames, frame_duration=20):
+    async def send_opus_frames(self, websocket, opus_frames, frame_duration=20, session_id=None):
         """Send Opus frames to client with proper framing"""
         try:
             print(f"   📤 Sending {len(opus_frames)} Opus frames to client...")
@@ -296,6 +296,17 @@ class AudioServer:
                 await asyncio.sleep(frame_duration / 1000.0)  # Convert ms to seconds
                 
             print(f"   ✅ All Opus frames sent successfully")
+            
+            if session_id:
+                # Send stop signal after audio streaming completes
+                stop_message = {
+                    "type": "stop",
+                    "session_id": session_id
+                }
+                await websocket.send_json(stop_message)
+                print(f"   🛑 Sent stop signal to client")
+            else:
+                print("   ⚠️ Skipping stop signal - session_id not available")
             
         except Exception as e:
             print(f"   ❌ Error sending Opus frames: {e}")
@@ -435,7 +446,7 @@ class AudioServer:
                                                     })
                                                     
                                                     # Send Opus frames
-                                                    await self.send_opus_frames(websocket, opus_frames, frame_duration)
+                                                    await self.send_opus_frames(websocket, opus_frames, frame_duration, session_id)
                                                     print("   🔊 Opus audio response sent to client")
                                                 else:
                                                     print("   ⚠️ No Opus frames generated")
@@ -516,7 +527,6 @@ class AudioServer:
                                 import traceback
                                 traceback.print_exc()
 
-                        await websocket.send_json({'status': 'session_ended'})
                         print(f"✅ SESSION ENDED - ID: {session_id}\n" + "="*50)
 
                 # Binary (OPUS frame)
