@@ -17,7 +17,7 @@ FRAME_DURATION = 20  # ms
 FRAME_SIZE = int(SAMPLE_RATE * FRAME_DURATION / 1000)
 
 class AudioClient:
-    def __init__(self, server_uri="ws://localhost:5000/ws/audio"):
+    def __init__(self, server_uri="ws://159.65.157.166:5000/ws/audio"):
         self.server_uri = server_uri
         self.session_id = None
         try:

@@ -1,0 +1,14 @@
+version: "3.9"
+
+services:
+  app:
+    image: rahulpscraftech360/websocketcheeko
+    container_name: websocketcheeko
+    ports:
+      - "5000:5000"
+    restart: always
+    environment:
+      DEEPGRAM_API_KEY: "713fb49d9c045434a03ce41fc3aef56e60b8b918"
+      GROQ_API_KEY: "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"
+      ELEVENLABS_API_KEY: "sk_7bbbc42db83364614c2e07da3991c16a91256df9e7281f37"
+    # Tip: For production, load API keys from a `.env` file instead.
