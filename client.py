@@ -10,7 +10,7 @@ import queue
 
 SAMPLE_RATE = 16000
 CHANNELS = 1
-FRAME_DURATION = 20
+FRAME_DURATION = 40  # Updated from 20 to 40 ms
 FRAME_SIZE = int(SAMPLE_RATE * FRAME_DURATION / 1000)
 
 class AudioClient:
@@ -63,12 +63,19 @@ class AudioClient:
                 if isinstance(message, str):
                     try:
                         data = json.loads(message)
-                        if data.get('type') == 'audio_response' and not self.output_stream:
-                            self.start_playback()
-                        elif data.get('type') == 'ack':
-                            print(f"✅ Session acknowledged")
+                        if data.get('type') == 'ack':
+                            print("✅ Session acknowledged by server")
+                        elif data.get('type') == 'audio_response':
+                            print("🎧 Audio Stream Details:")
+                            print(f" - Format: {data.get('format')}")
+                            print(f" - Sample Rate: {data.get('sample_rate')} Hz")
+                            print(f" - Channels: {data.get('channels')}")
+                            print(f" - Frame Duration: {data.get('frame_duration')} ms")
+                            print(f" - Total Frames: {data.get('frame_count')}")
+                            if not self.output_stream:
+                                self.start_playback()
                     except json.JSONDecodeError:
-                        print("Invalid JSON received.")
+                        print("❌ Invalid JSON received from server.")
                 elif isinstance(message, bytes):
                     if len(message) >= 4:
                         frame_length = struct.unpack('>I', message[:4])[0]
@@ -77,7 +84,7 @@ class AudioClient:
                             pcm_data = self.decoder.decode(opus_frame, FRAME_SIZE)
                             self.queue_audio_for_playback(pcm_data)
         except Exception as e:
-            print(f"Server message error: {e}")
+            print(f"❌ Error receiving message: {e}")
 
     async def start_session(self):
         await self.websocket.send(json.dumps({

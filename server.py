@@ -13,6 +13,7 @@ from fastapi import WebSocketDisconnect
 
 from pydub import AudioSegment
 import opuslib
+from mutagen.mp3 import MP3
 
 app = FastAPI()
 
@@ -29,13 +30,43 @@ class AudioServer:
     def __init__(self):
         self.active_sessions = {}
 
-    def generate_opus_from_mp3(self, mp3_path, sample_rate=16000, channels=1, frame_duration=20):
+    def generate_opus_from_mp3(self, mp3_path, sample_rate=16000, channels=1, frame_duration=40):
+        # Read encoded MP3 properties
+        try:
+            mp3_info = MP3(mp3_path).info
+            encoded_bitrate = mp3_info.bitrate / 1000  # kbps
+            encoded_sample_rate = mp3_info.sample_rate
+            encoded_channels = mp3_info.channels
+            encoded_duration = mp3_info.length
+        except Exception as e:
+            print(f"⚠️ Failed to read MP3 metadata with mutagen: {e}")
+            encoded_bitrate = encoded_sample_rate = encoded_channels = encoded_duration = None
+
         audio_segment = AudioSegment.from_mp3(mp3_path)
+
+        # Print both encoded and PCM stats
+        print("📊 Original MP3 Properties:")
+        print(f" - Frame Rate (Hz): {audio_segment.frame_rate}")
+        print(f" - Channels: {audio_segment.channels}")
+        print(f" - Sample Width (bytes): {audio_segment.sample_width}")
+        print(f" - Frame Width: {audio_segment.frame_width}")
+        print(f" - Frame Count: {audio_segment.frame_count()}")
+        print(f" - Duration (sec): {audio_segment.duration_seconds}")
+        if encoded_bitrate:
+            print(f" - Encoded MP3 Bitrate: {encoded_bitrate:.2f} kbps")
+            print(f" - MP3 Sample Rate: {encoded_sample_rate} Hz")
+            print(f" - MP3 Channels: {encoded_channels}")
+            print(f" - MP3 Duration: {encoded_duration:.2f} sec")
+        else:
+            bitrate_kbps = (len(audio_segment.raw_data) * 8) / (1000 * audio_segment.duration_seconds)
+            print(f" - Approx Bitrate (PCM): {bitrate_kbps:.2f} kbps")
+
+        # Downsample and prepare
         audio_segment = audio_segment.set_frame_rate(sample_rate)
         audio_segment = audio_segment.set_channels(channels)
         audio_segment = audio_segment.set_sample_width(2)
-        pcm_data = audio_segment.raw_data
 
+        pcm_data = audio_segment.raw_data
         encoder = opuslib.Encoder(sample_rate, channels, 'voip')
         frame_size = (frame_duration * sample_rate) // 1000
         frame_bytes = frame_size * channels * 2
@@ -69,7 +100,7 @@ class AudioServer:
                         session_id = str(uuid.uuid4())
                         sample_rate = 16000
                         channels = 1
-                        frame_duration = 20
+                        frame_duration = 40  # Updated from 20 to 40
 
                         print(f"🎤 Session started: {session_id}")
 
@@ -82,7 +113,7 @@ class AudioServer:
                         })
 
                         # Generate Opus from default.mp3
-                        mp3_path = "default.mp3"
+                        mp3_path = "final_converted.mp3"
                         if not os.path.exists(mp3_path):
                             await websocket.send_json({
                                 'type': 'error',
