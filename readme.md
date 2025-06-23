@@ -105,3 +105,8 @@ Contributions are welcome! Please follow these steps:
 
 ## License
 This project is licensed under the MIT License. See [LICENSE](LICENSE) for details.
+
+
+docker build -t rahulpscraftech360/websocketcheeko:latest .
+
+docker push rahulpscraftech360/websocketcheeko:latest
