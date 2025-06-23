@@ -23,6 +23,8 @@ class AudioClient:
         self.playback_thread = None
         self.playback_active = False
         self.space_pressed = False
+        self.frame_duration = FRAME_DURATION  # Default
+        self.frame_size = FRAME_SIZE          # Default
 
     async def connect(self):
         self.websocket = await websockets.connect(
@@ -72,6 +74,9 @@ class AudioClient:
                             print(f" - Channels: {data.get('channels')}")
                             print(f" - Frame Duration: {data.get('frame_duration')} ms")
                             print(f" - Total Frames: {data.get('frame_count')}")
+                            # Update frame_duration and frame_size based on server info
+                            self.frame_duration = data.get('frame_duration', FRAME_DURATION)
+                            self.frame_size = int(SAMPLE_RATE * self.frame_duration / 1000)
                             if not self.output_stream:
                                 self.start_playback()
                     except json.JSONDecodeError:
@@ -81,7 +86,8 @@ class AudioClient:
                         frame_length = struct.unpack('>I', message[:4])[0]
                         if len(message) == frame_length + 4:
                             opus_frame = message[4:]
-                            pcm_data = self.decoder.decode(opus_frame, FRAME_SIZE)
+                            # Use dynamic frame_size for decoding
+                            pcm_data = self.decoder.decode(opus_frame, self.frame_size)
                             self.queue_audio_for_playback(pcm_data)
         except Exception as e:
             print(f"❌ Error receiving message: {e}")

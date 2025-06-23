@@ -100,7 +100,7 @@ class AudioServer:
                         session_id = str(uuid.uuid4())
                         sample_rate = 16000
                         channels = 1
-                        frame_duration = 40  # Updated from 20 to 40
+                        frame_duration = 60  
 
                         print(f"🎤 Session started: {session_id}")
 
@@ -113,7 +113,7 @@ class AudioServer:
                         })
 
                         # Generate Opus from default.mp3
-                        mp3_path = "final_converted.mp3"
+                        mp3_path = "default.mp3"
                         if not os.path.exists(mp3_path):
                             await websocket.send_json({
                                 'type': 'error',
