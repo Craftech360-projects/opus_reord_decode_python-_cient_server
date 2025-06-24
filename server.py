@@ -155,6 +155,12 @@ audio_server = AudioServer()
 async def websocket_endpoint(websocket: WebSocket):
     await audio_server.handle_websocket(websocket)
 
+# Check for default.mp3 presence before starting the server
+if not os.path.exists("default.mp3"):
+    print("❌ ERROR: default.mp3 not found in the server directory!")
+else:
+    print("✅ default.mp3 found.")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("server:app", host="0.0.0.0", port=5000, reload=True)

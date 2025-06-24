@@ -14,7 +14,7 @@ FRAME_DURATION = 40  # Updated from 20 to 40 ms
 FRAME_SIZE = int(SAMPLE_RATE * FRAME_DURATION / 1000)
 
 class AudioClient:
-    def __init__(self, server_uri="ws://142.93.217.140:5000/ws/audio"):
+    def __init__(self, server_uri="ws://192.168.1.3:5000/ws/audio"):
         self.server_uri = server_uri
         self.decoder = opuslib.Decoder(SAMPLE_RATE, CHANNELS)
         self.audio = pyaudio.PyAudio()
