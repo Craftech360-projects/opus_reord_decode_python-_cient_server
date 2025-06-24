@@ -13,11 +13,11 @@ import queue
 # Audio configuration (matches protocol spec)
 SAMPLE_RATE = 16000  # Hz
 CHANNELS = 1
-FRAME_DURATION = 20  # ms
+FRAME_DURATION = 60  # ms  # <-- Change from 20 to 60 to match server
 FRAME_SIZE = int(SAMPLE_RATE * FRAME_DURATION / 1000)
 
 class AudioClient:
-    def __init__(self, server_uri="ws://159.65.157.166:5000/ws/audio"):
+    def __init__(self, server_uri="ws://64.227.165.99:5000/ws/audio"):
         self.server_uri = server_uri
         self.session_id = None
         try:

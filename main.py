@@ -187,7 +187,7 @@ class AudioServer:
         response.raise_for_status()
         return response.json()["choices"][0]["message"]["content"]
     
-    def generate_audio_opus(self, text, target_sample_rate=16000, target_channels=1, frame_duration=20):
+    def generate_audio_opus(self, text, target_sample_rate=16000, target_channels=1, frame_duration=60):
         """Generate Opus audio from text using ElevenLabs and convert to Opus format"""
         if not self.elevenlabs_api_key:
             print("   ⚠️ ElevenLabs API key not available, skipping audio generation")
@@ -278,7 +278,7 @@ class AudioServer:
             print(f"   ❌ Audio generation failed: {e}")
             return []
 
-    async def send_opus_frames(self, websocket, opus_frames, frame_duration=20, session_id=None):
+    async def send_opus_frames(self, websocket, opus_frames, frame_duration=60, session_id=None):
         """Send Opus frames to client with proper framing"""
         try:
             print(f"   📤 Sending {len(opus_frames)} Opus frames to client...")
@@ -427,7 +427,7 @@ class AudioServer:
                                                     llm_response, 
                                                     target_sample_rate=sample_rate, 
                                                     target_channels=channels,
-                                                    frame_duration=frame_duration
+                                                    frame_duration=60
                                                 )
                                                 
                                                 # Send audio response to client
@@ -510,13 +510,16 @@ class AudioServer:
                                     # Save as WAV
                                     print(f"\n💾 SAVING WAV FILE...")
                                     try:
+                                        output_folder = "output_wav"
+                                        os.makedirs(output_folder, exist_ok=True)  # Create folder if it doesn't exist
                                         filename = f"{datetime.now().strftime('%Y%m%d-%H%M%S')}-{session_id}.wav"
-                                        with wave.open(filename, 'wb') as wav_file:
+                                        filepath = os.path.join(output_folder, filename)
+                                        with wave.open(filepath, 'wb') as wav_file:
                                             wav_file.setnchannels(channels)
                                             wav_file.setsampwidth(2)  # 16-bit
                                             wav_file.setframerate(sample_rate)
                                             wav_file.writeframes(pcm_data)
-                                        print(f"   ✅ WAV file saved: {filename}")
+                                        print(f"   ✅ WAV file saved: {filepath}")
                                     except Exception as e:
                                         print(f"   ❌ WAV save failed: {e}")
                                 else:
@@ -532,6 +535,16 @@ class AudioServer:
                 # Binary (OPUS frame)
                 elif 'bytes' in message and session_id:
                     frame_data = message['bytes']
+                    # --- Add this check to prevent KeyError ---
+                    if session_id not in self.active_sessions:
+                        print(f"❌ Received frame for unknown session_id: {session_id}")
+                        await websocket.send_json({
+                            'type': 'error',
+                            'code': 'unknown_session',
+                            'message': f'Session {session_id} not found. Please start a session first.'
+                        })
+                        continue
+                    # --- End of added check ---
                     session_info = self.active_sessions[session_id]
                     session_info['frame_count'] += 1
                     
